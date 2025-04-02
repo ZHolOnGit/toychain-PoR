@@ -98,7 +98,7 @@ class ProofOfAuthority:
 
         return True
 
-class ProofOfAuth():
+class ProofOfAuth:
     """
     Generates a block every X seconds
     """

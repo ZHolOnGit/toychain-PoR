@@ -1,7 +1,52 @@
 import copy
 from time import sleep
 
-from toychain.src.utils.constants import MEMPOOL_SYNC_INTERVAL, CHAIN_SYNC_INTERVAL, MEMPOOL_SYNC_TAG, CHAIN_SYNC_TAG
+from toychain.src.utils.constants import MEMPOOL_SYNC_INTERVAL, CHAIN_SYNC_INTERVAL, MEMPOOL_SYNC_TAG, CHAIN_SYNC_TAG, \
+    VOTE_SYNC_INTERVAL, GET_VOTE_TAG
+
+
+class VotePinger:
+    def __init__(self, node, interval=VOTE_SYNC_INTERVAL):
+        self.node  = node
+        self.message_handler = node.message_handler
+        self.node_server = node.node_server_thread
+        self.interval = interval
+
+        self.flag = False
+        self.sleep = 0
+
+    def run(self):
+        peer_list = copy.copy(self.node.peers)
+        try:
+            for peer in peer_list:
+                self.get_vote(peer)
+
+            self.sleep = self.interval
+
+        except (ConnectionAbortedError, BrokenPipeError) as e:
+            print(e)
+
+        except Exception as e:
+            self.stop()
+            raise e
+
+    def step(self):
+        if self.flag:
+            if self.sleep > 0:
+                self.sleep -= 1
+            else:
+                self.run()
+    def start(self):
+        self.flag = True
+
+    def stop(self):
+        self.flag = False
+
+    def get_vote(self, enode):
+        request = self.message_handler.construct_message("",GET_VOTE_TAG, enode)
+        self.node_server.send_request(enode,request)
+
+
 
 class ChainPinger():
     def __init__(self, node, interval=CHAIN_SYNC_INTERVAL):
@@ -47,7 +92,7 @@ class ChainPinger():
         self.node_server.send_request(enode, request)
 
 
-class MemPoolPinger():
+class MemPoolPinger:
     def __init__(self, node, interval=MEMPOOL_SYNC_INTERVAL):
         self.node = node
         self.node_server = node.node_server_thread

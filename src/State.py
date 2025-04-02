@@ -27,7 +27,9 @@ class StateMixin:
     @property
     def state_hash(self):
         return compute_hash(self.state.values())
-    
+
+
+    #tx is transaction data
     def apply_transaction(self, tx, block):
         self.msg = tx
         self.block = block
