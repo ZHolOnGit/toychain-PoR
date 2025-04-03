@@ -37,7 +37,6 @@ class Block:
         self.transactions_root = self.transactions_hash()
         self.hash = self.compute_block_hash()
         self.signature = None #Sign the block hash using the leader private key
-        self.leader_public_key = None #TODO: Remove this? if storing pubkey in consensus for security anyways
 
     def sign_block(self, private_key):
         """This function digitally signs the block using the private key of the block creator"""
@@ -60,8 +59,14 @@ class Block:
         computes the hash of the block transactions
         :return: the hash of the transaction list
         """
-        transaction_list = [transaction_to_dict(t) for t in self.data]
+        #TODO: figure out why tf this function called so many times for seemingly no reason
+        transaction_list = []
+        for t in self.data:
+            t.sig_chain_to_json()
+            transaction_list.append(t)
         self.transactions_root = compute_hash(transaction_list)
+        for transaction in self.data:
+            transaction.json_to_sig_chain()
         return self.transactions_root
 
     def get_header_hash(self):
@@ -70,6 +75,9 @@ class Block:
 
     def increase_nonce(self):  ###### POW
         self.nonce += 1
+
+    def __str__(self):
+        return f"height: {self.height}, minerId: {self.miner_id}, hash: {self.hash}, data: {self.data}, timestamp: {self.timestamp}"
 
     def __repr__(self):
         """

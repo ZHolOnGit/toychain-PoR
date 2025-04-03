@@ -2,11 +2,11 @@ import copy
 import logging
 import urllib.parse
 
-from toychain.src.Transaction import dict_to_transaction
+
 from toychain.src.utils.constants import MEMPOOL_SYNC_TAG, CHAIN_SYNC_TAG, BLOCK_REQUEST_TAG, MISSING_MEMPOOL_TAG, \
     GET_VOTE_TAG
 from toychain.src.utils.helpers import transaction_to_dict, block_to_list, \
-    transaction_to_id, vote_to_dict
+    transaction_to_id, vote_to_dict, dict_to_transaction
 
 logger = logging.getLogger('w3')
 
@@ -24,7 +24,7 @@ class MessageHandler:
             MEMPOOL_SYNC_TAG: self.handle_request_mempool,
             CHAIN_SYNC_TAG: self.handle_request_sync,
             BLOCK_REQUEST_TAG: self.handle_request_block,
-            MISSING_MEMPOOL_TAG: self.handle_missing_mempool, #Missing mempool is the one that actually sends the missing transactions
+            MISSING_MEMPOOL_TAG: self.handle_request_missing_mempool, #Missing mempool is the one that actually sends the missing transactions
             GET_VOTE_TAG: self.handle_vote_request
             }
 
@@ -87,14 +87,14 @@ class MessageHandler:
 
     def handle_request_sync(self, msg):
         """ Returns the latest hash and difficulty """
-        return self.node.get_block('last').get_header_hash()
+        return self.node.get_block('last').get_header_hash(), len(self.node.chain)
 
     def handle_request_block(self, msg):
         """ Checks if one of the indicated blocks is in its chain
             Once a common block is found """
         #Might have to alter this one, but don't really see the harm in keeping the partial chain stuff
         #Assuming that there are no forks in the chain,
-        print(f"Block sync request data {msg['data']}, id that crashes {self.node.id}, id received {msg['sender']}")
+        #print(f"Block sync request data {msg['data']}, id that crashes {self.node.id}, id sender {msg['sender']}")
         for header_hash, height in msg["data"]:
             potential_common_block = self.node.get_block(height)
             if potential_common_block is None:
@@ -110,7 +110,7 @@ class MessageHandler:
                 return height, partial_chain
         return height, None
 
-    def handle_missing_mempool(self, msg):
+    def handle_request_missing_mempool(self, msg):
         """This function gets all the transactions that are requested by id, signs them, then sends them to the
         requester """
         transactions = []
@@ -164,20 +164,24 @@ class MessageHandler:
 
     def handle_answer_sync(self, msg):
 
-        peer_hash   = msg["data"]
-        local_hash = self.node.get_sync_info()
+        peer_hash, peer_height   = msg["data"]
+        local_hash, local_height = self.node.get_sync_info()
+
+        #print(f"ID {self.node.id}, sender: {msg['sender']}, Answer sync LH:{local_height}, PH: {peer_height}, LHash: {local_hash}, PHash: {peer_hash}")
 
         # Case 1: My chain is already synchronized with the peer
         if local_hash == peer_hash:
             return
-
+        #My chain is longer or equal length - equal len kinda checked above
+        elif local_height >= peer_height:
+            return
         # Case 3: Peer has longer chain
         else:
+            print(f"requesting blocks ID {self.node.id}, sender: {msg['sender']}")
             self.request_block(self.node.current_height, msg["sender"])
 
 
     def handle_answer_block(self, msg):
-
         height, partial_chain = msg["data"]
         if height is None:
             return

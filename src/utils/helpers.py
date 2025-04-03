@@ -1,10 +1,14 @@
 import base64
+import copy
 import struct
 from hashlib import sha256
 
 import nacl.bindings
 import nacl.signing
 import xxhash
+
+from toychain.src.Transaction import Transaction, pub_key_to_json, signature_to_json, \
+    json_to_pub_key, json_to_signature
 
 
 def compute_hash(list):
@@ -39,14 +43,18 @@ def vote_to_dict(id, vote):
 
 
 def block_to_list(block):
+    #TODO: These 2 functions need to handle serializing and de serialising the stransactions
     """
     Translates a block in a list
     """
     data = []
     for t in block.data:
-        data.append(transaction_to_dict(t))
+        t.sig_chain_to_json()
+        transaction_to_send = copy.deepcopy(t)
+        data.append(transaction_to_dict(transaction_to_send))
+        t.json_to_sig_chain()
     return [block.height, block.parent_hash, data, block.miner_id, block.timestamp, block.nonce,
-            block.state.state_variables, signature_to_json(block.signature), pub_key_to_json(block.leader_public_key)]
+            block.state.state_variables, signature_to_json(block.signature)]
 
 
 def create_block_from_list(_list):
@@ -54,15 +62,16 @@ def create_block_from_list(_list):
     parent_hash = _list[1]
     data = []
     for d in _list[2]:
-        data.append(dict_to_transaction(d))
+        transaction = dict_to_transaction(d)
+        transaction.json_to_sig_chain()
+        data.append(transaction)
     miner_id = _list[3]
     timestamp = _list[4]
     nonce = _list[5]
     state_variables = _list[6]
     signature = json_to_signature(_list[7])
-    pub_key = json_to_pub_key(_list[8])
 
-    return height, parent_hash, data, miner_id, timestamp, nonce, state_variables, signature, pub_key
+    return height, parent_hash, data, miner_id, timestamp, nonce, state_variables, signature
 
 
 class CustomTimer:
@@ -93,20 +102,12 @@ def gen_enode(id, host = '127.0.0.1', port = 0):
     return f"enode://{id}@{host}:{port}"
 
 
-def signature_to_json(signature):
-    return base64.b64encode(signature).decode("utf-8")
-
-def json_to_signature(signature):
-    return base64.b64decode(signature)
-
-def json_to_pub_key(json_pub_key):
-    # print(json_pub_key, "To pub key object")
-    return nacl.signing.VerifyKey(base64.b64decode(json_pub_key))
-
-def pub_key_to_json(pub_key):# I really dont understand
-    # print(pub_key,   "Convert to json")
-    key_bytes = bytes(pub_key)
-    return base64.b64encode(key_bytes).decode("utf-8")
+def dict_to_transaction(_dict):
+    transaction = Transaction(_dict["source"], _dict["destination"], _dict["value"], _dict["data"],_dict["timestamp"], _dict["nonce"], _dict["id"])
+    transaction.signature_chain = _dict["signature_chain"]
+    transaction.source_pub_key = _dict["source_pub_key"]
+    transaction.completed = _dict["completed"]
+    return transaction
 
 
 #These 2 functions might be unnecessary

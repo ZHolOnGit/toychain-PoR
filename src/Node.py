@@ -106,7 +106,7 @@ class Node:
         """
         self.syncing = True
         self.node_server_thread.start()
-        self.chain_sync_thread.start()
+        # self.chain_sync_thread.start()
         self.mempool_sync_thread.start()
 
     def stop_tcp(self):
@@ -185,9 +185,8 @@ class Node:
         partial_chain = []
         for block_repr in chain_repr:
             block_vars = create_block_from_list(block_repr)
-            block = Block(*block_vars[:-2])
-            block.signature = block_vars[-2]
-            block.public_key = block_vars[-1]
+            block = Block(*block_vars[:-1])
+            block.signature = block_vars[-1]
             partial_chain.append(block)
 
 
@@ -220,7 +219,7 @@ class Node:
 
             del self.chain[height+1:]
             self.chain.extend(partial_chain)
-            logger.info(f"Node {self.id} has updated its chain, total difficulty : {self.get_block('last').total_difficulty}, n = {partial_chain[-1].state.state_variables.get('n')}")
+            print(f"Node {self.id} has updated its chain, n = {partial_chain[-1].state.state_variables.get('n')}")
             for block in self.chain[-5:]:
                 logger.info(f"{block.__repr__()}   ##{len(block.data)}##  {block.state.state_variables}")
 
@@ -306,7 +305,7 @@ class Node:
         return int(self.chain[-1].total_difficulty)
 
     def get_sync_info(self):
-        return self.get_block('last').get_header_hash()
+        return self.get_block('last').get_header_hash(), len(self.chain)
     
     def get_produced_block(self):
         t = self.produced_block

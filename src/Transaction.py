@@ -1,12 +1,11 @@
+import base64
 import json
 import sys
 from uuid import uuid4
 
+import nacl.signing
 import xxhash
 from nacl.exceptions import BadSignatureError
-
-from toychain.src.utils.helpers import json_to_pub_key, pub_key_to_json, signature_to_json, json_to_signature
-
 
 class Transaction:
     def __init__(self, sender, destination = 0, value = 0, data={}, timestamp=None, nonce=None, id=None, source_pub_key=None):
@@ -63,14 +62,12 @@ class Transaction:
          cryptographic elements that need to be serialised."""
         json_chain = []
         for sig in self.signature_chain:
-            json_chain.append(json.dumps(self.sig_to_json(sig).__dict__))
+            sig.sig_to_json()
+            json_chain.append(json.dumps(sig.__dict__))
         self.signature_chain = json_chain
         self.json = True
 
-    def sig_to_json(self, sig):
-        sig.public_key = pub_key_to_json(sig.public_key)
-        sig.signature = signature_to_json(sig.signature)
-        return sig
+
 
 
     def json_to_sig_chain(self):
@@ -81,9 +78,9 @@ class Transaction:
                 instance = GenesisSignatureChainEntry(data['public_key'], data['id'], data['relayer_id'], self.data)
             else:
                 instance = SignatureChainEntry(data['public_key'], data['id'], data['relayer_id'])
+            instance.signature = data['signature']
 
-            instance.public_key = json_to_pub_key(instance.public_key)
-            instance.signature = json_to_signature(data['signature'])
+            instance.json_to_sig()
             sig_chain.append(instance)
 
         self.signature_chain = sig_chain
@@ -128,6 +125,13 @@ class SignatureChainEntry:
 
         self.signature = signed_message.signature
 
+    def sig_to_json(self):
+        self.public_key = pub_key_to_json(self.public_key)
+        self.signature = signature_to_json(self.signature)
+
+    def json_to_sig(self):
+        self.public_key = json_to_pub_key(self.public_key)
+        self.signature = json_to_signature(self.signature)
 
     def __str__(self):
         return f"id: {self.id}, relayer_id: {self.relayer_id}, public key: {self.public_key}, signature: {self.signature} "
@@ -225,9 +229,19 @@ def validate_transaction(transaction):
 
     return True
 
-def dict_to_transaction(_dict):
-    transaction = Transaction(_dict["source"], _dict["destination"], _dict["value"], _dict["data"],_dict["timestamp"], _dict["nonce"], _dict["id"])
-    transaction.signature_chain = _dict["signature_chain"]
-    transaction.source_pub_key = _dict["source_pub_key"]
-    transaction.completed = _dict["completed"]
-    return transaction
+def signature_to_json(signature):
+    return base64.b64encode(signature).decode("utf-8")
+
+def json_to_signature(signature):
+    return base64.b64decode(signature)
+
+def json_to_pub_key(json_pub_key):
+    # print(json_pub_key, "To pub key object")
+    return nacl.signing.VerifyKey(base64.b64decode(json_pub_key))
+
+def pub_key_to_json(pub_key):# I really dont understand
+    # print(pub_key,   "Convert to json")
+    key_bytes = bytes(pub_key)
+    return base64.b64encode(key_bytes).decode("utf-8")
+
+
