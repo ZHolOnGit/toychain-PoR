@@ -135,12 +135,13 @@ class MessageHandler:
                 transaction.json_to_sig_chain()
 
 
-        print(f"{len(transactions)} missing transactions sent")
+        #print(f"{len(transactions)} missing transactions sent")
         return transactions
 
 
     def handle_vote_request(self,msg):
-        return vote_to_dict(self.node.id, self.node.mining_thread.candidate_state)
+        #print(f"get Vote id: {self.node.id} candidate: {self.node.mining_thread.candidate_state}")
+        return vote_to_dict(self.node.id, self.node.mining_thread.candidate_state, self.node.mining_thread.sig_chain_cache[1])
 
 
     ################# ANSWER HANDLERS  ########################
@@ -177,7 +178,6 @@ class MessageHandler:
             return
         # Case 3: Peer has longer chain
         else:
-            print(f"requesting blocks ID {self.node.id}, sender: {msg['sender']}")
             self.request_block(self.node.current_height, msg["sender"])
 
 
@@ -215,9 +215,6 @@ class MessageHandler:
     def handle_vote_answer(self,msg):
         """This function adds the vote received to the current collection of votes"""
         self.node.mining_thread.add_vote(msg["data"])
-
-
-
 
 
 

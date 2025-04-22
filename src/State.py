@@ -34,22 +34,26 @@ class StateMixin:
         self.msg = tx
         self.block = block
 
+        #TODO: might have to comment out the balance stuff for now
+
         # Initialize funds of unused addresses
+        #This function sets the value of the balance at 0 if not already initialised, returns value if key exists
         self.balances.setdefault(tx.sender, 0)
-        self.balances.setdefault(tx.receiver, 0)
+        self.balances.setdefault(tx.destination, 0)
 
         # Check sender funds
         if tx.value and self.balances[tx.sender] < tx.value:
             logger.info("Insufficient Balance")
             return
-        
+
+        #TODO: funds arent transfered, just minused by the cost of the transaction, money given out later
+
         # Apply the transfer of funds
         self.balances[tx.sender] -= tx.value
-        self.balances[tx.receiver] += tx.value
+        self.balances[tx.destination] += tx.value
         
         # Increment the transaction counter
         self.n += 1
-
         # Apply the other functions contained in data
         if tx.data and 'function' in tx.data and 'inputs' in tx.data:
             function = getattr(self, tx.data.get("function"))

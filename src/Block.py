@@ -4,7 +4,7 @@ from random import randint
 
 from toychain.scs.deploy import Contract as State
 from toychain.src.Transaction import signature_to_json, pub_key_to_json
-from toychain.src.utils.helpers import compute_hash, transaction_to_dict
+from toychain.src.utils.helpers import compute_hash
 
 logger = logging.getLogger('block')
 
@@ -37,6 +37,7 @@ class Block:
         self.transactions_root = self.transactions_hash()
         self.hash = self.compute_block_hash()
         self.signature = None #Sign the block hash using the leader private key
+        self.byzantine = False
 
     def sign_block(self, private_key):
         """This function digitally signs the block using the private key of the block creator"""
@@ -95,8 +96,10 @@ class Block:
             "BlockHash": self.hash,
             "StateHash": self.state.state_hash if self.state else None,
             "Signature": signature_to_json(self.signature),
-            "PublicKey": pub_key_to_json(self.leader_public_key)
+            "Frequency Estimate" : self.state.frequency_estimate,
+            "Byzantine" : self.byzantine
         }
 
+    #Edit this function to add +, what does this comment mean
     def to_json_string(self):
         return json.dumps(self.to_json(), indent=4)

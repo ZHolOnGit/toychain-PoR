@@ -1,14 +1,11 @@
-import base64
 import copy
+import json
 import struct
-from hashlib import sha256
 
-import nacl.bindings
-import nacl.signing
 import xxhash
 
-from toychain.src.Transaction import Transaction, pub_key_to_json, signature_to_json, \
-    json_to_pub_key, json_to_signature
+from toychain.src.Transaction import Transaction, signature_to_json, \
+    json_to_signature
 
 
 def compute_hash(list):
@@ -35,15 +32,19 @@ def transaction_to_id(transaction):
     return {"id": transaction.id,
             "completed": transaction.completed}
 
-def vote_to_dict(id, vote):
+def vote_to_dict(id, vote, winning_sig):
+    winning_sig.sig_to_json()
+    to_send = copy.copy(winning_sig)
+    winning_sig.json_to_sig()
     return {"id": id,
-            "vote": vote}
+            "vote": vote,#
+            "winning_sig":json.dumps(to_send.__dict__)}
 
 
 
 
 def block_to_list(block):
-    #TODO: These 2 functions need to handle serializing and de serialising the stransactions
+    #TODO: These 2 functions need to handle serializing and de serialising the transactions
     """
     Translates a block in a list
     """
@@ -109,22 +110,3 @@ def dict_to_transaction(_dict):
     transaction.completed = _dict["completed"]
     return transaction
 
-
-#These 2 functions might be unnecessary
-def write_uint32(value):
-    return struct.pack("<I", value)
-
-def serialise_var_bytes(data):
-
-    if data is None:
-        return b'\x00'
-
-    length = len(data)
-    if length < 253:
-        return bytes([length]) + data #A one byte value
-    elif length <= 0xFFFF:
-        return b'\xfd' + struct.pack("<H", length) + data #a 2 byte value
-    elif length <= 0xFFFFFFFF:
-        return b'\xfe' + struct.pack("<I", length) + data #a 4 byte value
-    else:
-        return b'\xff' + struct.pack("<Q", length) + data # a 8 byte value

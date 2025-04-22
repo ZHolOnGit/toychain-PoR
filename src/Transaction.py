@@ -61,9 +61,11 @@ class Transaction:
          This is done because the nested object inside the transaction object cannot be sent, along with the
          cryptographic elements that need to be serialised."""
         json_chain = []
+        #This doesnt change back? could explain the issues when verifying tbh, but just gonna leave it
         for sig in self.signature_chain:
             sig.sig_to_json()
             json_chain.append(json.dumps(sig.__dict__))
+            sig.json_to_sig()
         self.signature_chain = json_chain
         self.json = True
 
@@ -187,6 +189,9 @@ def validate_chain(chain):
     A chain is only valid if the relayer ID matches the id of the next element in the chain
     All signatures have to be cryptographically valid"""
 
+    #TODO: additional validation being
+    #   Needs to have start and end matching the ones defined in the genesis block?
+
     for i in range(len(chain) - 1): #Needs to be minus 2?
         if chain[i].relayer_id != chain[i + 1].id:
             print("Invalid relayer id")
@@ -194,7 +199,8 @@ def validate_chain(chain):
 
     for index, sig in enumerate(chain):
         if not validate_signature(sig, chain, index):
-            print("invalid signature ")
+            print("Invalid signature validate chain")
+
             return False
 
     return True

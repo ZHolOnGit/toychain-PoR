@@ -1,24 +1,34 @@
 import copy
+import json
 import logging
 import os
-import sys
 
 from aenum import Enum
 from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 
 from toychain.src.Block import Block, State
-from toychain.src.Transaction import pub_key_to_json, json_to_pub_key
+from toychain.src.Transaction import json_to_pub_key, SignatureChainEntry
+from toychain.src.utils.constants import BLOCK_PERIOD
 
-logger = logging.getLogger('poa')
+logger = logging.getLogger('por')
 
 num_robots = int(os.environ['NUMROBOTS'])
-num_neighbours = int(os.environ['NUMNEIGHBOURS'])
+try:
+    num_neighbours = num_robots // 3
+    if num_neighbours % 2 == 0:
+        num_neighbours += 1
+    if num_neighbours <= 1:
+        num_neighbours = 3
+    print(f"num neighbours: {num_neighbours}")
+except ValueError:
+    num_neighbours = 3
+
 max_recent_leaders = 7 #Arbritray value
 
-GENESIS_BLOCK = Block(0, 0000, [],  0, 0, nonce = 1, state = State())
+GENESIS_BLOCK = Block(0, 0000, [],  0, 0, nonce = 1, state = State(num_robots=num_robots))
 
-BLOCK_PERIOD = 100 #Have the different lengths of time for transaction propagation and leader / new block propagation?
+#TODO: Have the different lengths of time for transaction propagation and leader / new block propagation?
 
 # There are X states - The code (Well AI explaning the code) and the wiki seem to be saying different things
 # Mining - The node receives transactions, adds them to the cache when appropriate
@@ -44,7 +54,7 @@ class ProofOfRelay:
     def verify_chain(self, chain, winning_signatures):
         """Function to check if the proposed new partial chain is valid considering the current state of the nodes blockchain"""
         last_block = chain[0] # The first element of the partial chain
-        print(f"winning sigs {winning_signatures}, height {last_block.height}")
+        #print(f"winning sigs {winning_signatures}, height {last_block.height}")
         last_pubkey = winning_signatures[last_block.height-1].public_key
 
 
@@ -129,29 +139,32 @@ class LowestLast:
             if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) > BLOCK_PERIOD:
                 self.state = MiningStates.LEADER
                 self.node.mempool_sync_thread.stop()
+                self.candidate_state = self.sig_chain_cache[1].id
                 self.node.vote_sync_thread.start()
                 print(f"Lowest mined signature: {self.sig_chain_cache[0]}, id: {self.sig_chain_cache[1].id} ")
 
 
         elif self.state == MiningStates.LEADER:
-            self.candidate_state = self.sig_chain_cache[1].id
             #When all the votes are collected
             if len(self.vote_cache) == num_neighbours:
-                candidate, count = self.count_votes()
+                candidate, count, winner_signature = self.count_votes()
                 #If the majority votes for a certain candidate
                 if count > (num_neighbours // 2):
                     self.candidate_state = candidate
+                    self.sig_chain_cache = (candidate, winner_signature)
+
                 self.vote_cache = []
             #After 100 ticks, the phase changes
             if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) > (2* BLOCK_PERIOD): #TODO: These timings could do with shortening?
-                print("ENTERING BLOCK STAGE")
                 self.state = MiningStates.BLOCK
                 self.create_block()
-                self.update_post_vote()
+                self.add_recent_leader(self.candidate_state)
+                self.winning_signatures.append(self.sig_chain_cache[1])
                 self.node.vote_sync_thread.stop()
                 self.node.chain_sync_thread.start()
 
         elif self.state == MiningStates.BLOCK:
+            self.update_post_vote()
             #The only thing in this block is to wait for the transactions to propogate
             #TODO: Try and understand what the apply transaction shit is, equivalent will be aggregating the new ground sent in?
             if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) < BLOCK_PERIOD:
@@ -161,11 +174,10 @@ class LowestLast:
                 self.node.mempool_sync_thread.start()
 
     def create_block(self):
-        print(f"Not WInner {self.candidate_state} {self.node.id}")
-
+        print(f"Block create id:{self.node.id} can:{self.candidate_state}")
         if self.node.id == self.candidate_state:
-            print(f"WINNNER {self.candidate_state} {self.node.id}")
             previous_block = copy.deepcopy(self.node.get_block('last'))
+            previous_state = previous_block.state
             mempool = list((self.node.mempool.copy().values()))
 
             # Filter out transactions already on the blockchain
@@ -177,10 +189,14 @@ class LowestLast:
                 data,
                 self.node.id,
                 # THis is the miner_id, it is the enode in other implementations but this makes more sense
-                self.node.custom_timer.time())  # There has been no state added yet, will be the aggregation
-            print(f"pre block sign, associated pub key {self.node.public_key} ")
+                self.node.custom_timer.time(),
+                state =previous_state)  # There has been no state added yet, will be the aggregation
             block.sign_block(self.node.private_key)
-            block.leader_public_key = self.node.public_key
+
+            #TODO: apply the transactions
+            for transaction in block.data:
+                block.state.apply_transaction(transaction, block)
+
 
             # Update the blockchain and mempool
             self.node.chain.append(block)
@@ -192,6 +208,7 @@ class LowestLast:
             logger.info(f"{repr(block)}")
             logger.info(f"{block.state.state_variables} \n")
 
+    #These 2 functions are for testing
     def check_completed(self):
         for transaction in self.node.mempool.values():
             if not transaction.completed:
@@ -229,7 +246,8 @@ class LowestLast:
         # assumed that the chain was validated and completed when it was accepted by the node and passed in here
         sig_chain = transaction.signature_chain
 
-        print(f"sig chain len {len(sig_chain)}")
+
+        #print(f"sig chain len {len(sig_chain)}")
         for sig in sig_chain:
             current_value = self.compute_sig_value(sig)
             if current_value < self.sig_chain_cache[0]:
@@ -261,7 +279,26 @@ class LowestLast:
             else:
                 frequency[dict["vote"]] = 1
 
-        return max(frequency.items(), key=lambda x: x[1])
+        id, count =  max(frequency.items(), key=lambda x: x[1])
+
+        return id, count, self.get_voted_signature(id)
+
+
+    def get_voted_signature(self, vote_id):
+        """This function gets the json representation of the winning signature sent in during the voting stage
+        and re creates it into a signature object """
+        sig_dict = {}
+        for dict in self.vote_cache:
+            if dict["vote"] == vote_id:
+                sig_dict = json.loads(dict["winning_sig"])
+
+                break
+
+        sig = SignatureChainEntry(sig_dict['public_key'], sig_dict['id'], sig_dict['relayer_id'])
+        sig.signature = sig_dict["signature"]
+        sig.json_to_sig()
+        return sig
+
 
     def add_recent_leader(self, id):
         if len(self.recent_leaders) == max_recent_leaders:
@@ -269,7 +306,5 @@ class LowestLast:
         self.recent_leaders.append(id)
 
     def update_post_vote(self):
-        self.add_recent_leader(self.candidate_state)
-        self.winning_signatures.append(self.sig_chain_cache[1])
         self.sig_chain_cache = (float('inf'), None)
         self.candidate_state = None
