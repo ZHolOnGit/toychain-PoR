@@ -134,3 +134,7 @@ def load_key_pair(filename):
 
     return private, public
 
+=======
+def enode_to_id(enode):
+    return int(enode.split('@')[0].split('//')[1])
+
