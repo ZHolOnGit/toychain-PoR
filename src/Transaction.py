@@ -36,7 +36,6 @@ class Transaction:
     def __str__(self):
         return f"id: {self.id}, Destination: {self.destination}, from: {self.sender}, value: {self.value}, sig_chain_len: {len(self.signature_chain)}, Completed: {self.completed}, json: {self.json}"
 
-    #TODO: Something about adding the last block hash to the signature?
     def add_signature(self, private_key, public_key, id, relayer_id):
         """Appends the next element of the PoR signature chain, signature generated for each node the transaction is sent too
         Parameters:
@@ -170,7 +169,7 @@ def validate_signature(sig, chain, index):
 
     else:
         # [last_signature, self.id, self.relayer_id]
-        last_sig = chain[index-1].signature #TODO: will probably have to convert this to json aswell
+        last_sig = chain[index-1].signature
         message = f"{last_sig}:{sig.id}:{sig.relayer_id}"
         message_hash = xxhash.xxh64(message).digest()
 
@@ -188,9 +187,6 @@ def validate_chain(chain):
     """This is a function that checks to see signature chain is valid
     A chain is only valid if the relayer ID matches the id of the next element in the chain
     All signatures have to be cryptographically valid"""
-
-    #TODO: additional validation being
-    #   Needs to have start and end matching the ones defined in the genesis block?
 
     for i in range(len(chain) - 1): #Needs to be minus 2?
         if chain[i].relayer_id != chain[i + 1].id:
@@ -245,7 +241,7 @@ def json_to_pub_key(json_pub_key):
     # print(json_pub_key, "To pub key object")
     return nacl.signing.VerifyKey(base64.b64decode(json_pub_key))
 
-def pub_key_to_json(pub_key):# I really dont understand
+def pub_key_to_json(pub_key):
     # print(pub_key,   "Convert to json")
     key_bytes = bytes(pub_key)
     return base64.b64encode(key_bytes).decode("utf-8")

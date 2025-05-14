@@ -5,18 +5,16 @@ import unittest
 from toychain.src.Node import Node
 from toychain.src.Transaction import GenesisSignatureChainEntry, SignatureChainEntry, Transaction, validate_transaction
 from toychain.src.consensus.ProofOfAuth import ProofOfAuthority
-
-
+from toychain.src.consensus.ProofOfRelay import ProofOfRelay
 
 
 class TestTransactionSignature(unittest.TestCase):
 
     def setUp(self):
-        #TODO: Eventually change this to the PoR, only for consistency
-        self.Node1 = Node(1,"localhost","1000", ProofOfAuthority())
-        self.Node2 = Node(2,"localhost","1000", ProofOfAuthority())
-        self.Node3 = Node(3,"localhost","1000", ProofOfAuthority())
-        self.Node4 = Node(4,"localhost","1000", ProofOfAuthority())
+        self.Node1 = Node(1,"localhost","1000", ProofOfRelay())
+        self.Node2 = Node(2,"localhost","1000", ProofOfRelay())
+        self.Node3 = Node(3,"localhost","1000", ProofOfRelay())
+        self.Node4 = Node(4,"localhost","1000", ProofOfRelay())
         self.tran = Transaction(self.Node1.id, data={"reading1":400, "reading2":500, "reading3":600, "reading4":700}, source_pub_key=self.Node1.public_key)
 
 

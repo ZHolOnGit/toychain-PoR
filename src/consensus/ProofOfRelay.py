@@ -2,6 +2,8 @@ import copy
 import json
 import logging
 import os
+import pickle
+import sys
 
 from aenum import Enum
 from nacl.exceptions import BadSignatureError
@@ -27,8 +29,6 @@ except ValueError:
 max_recent_leaders = 7 #Arbritray value
 
 GENESIS_BLOCK = Block(0, 0000, [],  0, 0, nonce = 1, state = State(num_robots=num_robots))
-
-#TODO: Have the different lengths of time for transaction propagation and leader / new block propagation?
 
 # There are X states - The code (Well AI explaning the code) and the wiki seem to be saying different things
 # Mining - The node receives transactions, adds them to the cache when appropriate
@@ -63,7 +63,7 @@ class ProofOfRelay:
         i=1
         while 1 < len(chain):
             last_block_hash = last_block.compute_block_hash()
-            if chain[i].timestamp - last_block.timestamp < BLOCK_PERIOD: #TODO: this around 300?
+            if chain[i].timestamp - last_block.timestamp < BLOCK_PERIOD:
                 logger.error("Timestamp error in the blockchain")
                 logger.error(len(chain))
                 logger.error(f"Previous: {last_block.timestamp}, Current: {chain[i].timestamp}")
@@ -106,7 +106,6 @@ class ProofOfRelay:
             pass
         except BadSignatureError:
             return False
-        #TODO: decide if any more block verification needs to be done
 
         print("BLOCK VERIFIED ")
         return True
@@ -139,6 +138,8 @@ class LowestLast:
             if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) > BLOCK_PERIOD:
                 self.state = MiningStates.LEADER
                 self.node.mempool_sync_thread.stop()
+
+                #Have a try catch block here? a bit shit
                 self.candidate_state = self.sig_chain_cache[1].id
                 self.node.vote_sync_thread.start()
                 print(f"Lowest mined signature: {self.sig_chain_cache[0]}, id: {self.sig_chain_cache[1].id} ")
@@ -148,6 +149,7 @@ class LowestLast:
             #When all the votes are collected
             if len(self.vote_cache) == num_neighbours:
                 candidate, count, winner_signature = self.count_votes()
+                print(f"Vote info id: {self.node.id} candidate: {candidate}, count: {count}")
                 #If the majority votes for a certain candidate
                 if count > (num_neighbours // 2):
                     self.candidate_state = candidate
@@ -155,8 +157,9 @@ class LowestLast:
 
                 self.vote_cache = []
             #After 100 ticks, the phase changes
-            if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) > (2* BLOCK_PERIOD): #TODO: These timings could do with shortening?
+            if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) > (2* BLOCK_PERIOD):
                 self.state = MiningStates.BLOCK
+                print(f"CANDIDATE STATE {self.candidate_state}")
                 self.create_block()
                 self.add_recent_leader(self.candidate_state)
                 self.winning_signatures.append(self.sig_chain_cache[1])
@@ -166,7 +169,6 @@ class LowestLast:
         elif self.state == MiningStates.BLOCK:
             self.update_post_vote()
             #The only thing in this block is to wait for the transactions to propogate
-            #TODO: Try and understand what the apply transaction shit is, equivalent will be aggregating the new ground sent in?
             if (self.node.custom_timer.time() % (3 * BLOCK_PERIOD)) < BLOCK_PERIOD:
                 print(f"END BLOCK PERIOD, chainP{self.node.chain}")
                 self.state = MiningStates.MINING
@@ -193,7 +195,6 @@ class LowestLast:
                 state =previous_state)  # There has been no state added yet, will be the aggregation
             block.sign_block(self.node.private_key)
 
-            #TODO: apply the transactions
             for transaction in block.data:
                 block.state.apply_transaction(transaction, block)
 

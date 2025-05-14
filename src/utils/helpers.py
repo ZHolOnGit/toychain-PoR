@@ -2,7 +2,11 @@ import copy
 import json
 import struct
 
+from nacl.encoding import RawEncoder
+from nacl.signing import SigningKey
 import xxhash
+from cryptography.hazmat.backends.openssl import ed25519
+from cryptography.hazmat.primitives import serialization
 
 from toychain.src.Transaction import Transaction, signature_to_json, \
     json_to_signature
@@ -44,7 +48,6 @@ def vote_to_dict(id, vote, winning_sig):
 
 
 def block_to_list(block):
-    #TODO: These 2 functions need to handle serializing and de serialising the transactions
     """
     Translates a block in a list
     """
@@ -55,7 +58,7 @@ def block_to_list(block):
         data.append(transaction_to_dict(transaction_to_send))
         t.json_to_sig_chain()
     return [block.height, block.parent_hash, data, block.miner_id, block.timestamp, block.nonce,
-            block.state.state_variables, signature_to_json(block.signature)]
+            block.state.state_variables, signature_to_json(block.signature), block.byzantine]
 
 
 def create_block_from_list(_list):
@@ -71,8 +74,10 @@ def create_block_from_list(_list):
     nonce = _list[5]
     state_variables = _list[6]
     signature = json_to_signature(_list[7])
+    byzantine = _list[8]
 
-    return height, parent_hash, data, miner_id, timestamp, nonce, state_variables, signature
+
+    return height, parent_hash, data, miner_id, timestamp, nonce, state_variables, byzantine, signature
 
 
 class CustomTimer:
@@ -109,4 +114,23 @@ def dict_to_transaction(_dict):
     transaction.source_pub_key = _dict["source_pub_key"]
     transaction.completed = _dict["completed"]
     return transaction
+
+
+#For the byznatine robots
+def save_key_pair(filename):
+    private = SigningKey.generate()
+
+    private_bytes = private.encode(encoder=RawEncoder)
+
+    with open(filename, "wb") as f:
+        f.write(private_bytes)
+
+def load_key_pair(filename):
+    with open(filename, "rb") as f:
+        private_bytes = f.read()
+
+    private = SigningKey(private_bytes, encoder=RawEncoder)
+    public = private.verify_key
+
+    return private, public
 

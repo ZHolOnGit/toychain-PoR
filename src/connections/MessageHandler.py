@@ -19,7 +19,6 @@ class MessageHandler:
         self.enode = self.node.enode
 
         # Message type to handler  mappings
-        #TODO: Will need more of these for the voting stages
         self.requests_handler_mapping = {
             MEMPOOL_SYNC_TAG: self.handle_request_mempool,
             CHAIN_SYNC_TAG: self.handle_request_sync,
@@ -115,8 +114,8 @@ class MessageHandler:
         requester """
         transactions = []
         for dict in msg["data"]:
-            transaction = self.node.mempool[dict["id"]] #TODO: Some issues with the completed transactions
-            if transaction.completed: #TODO: Question, should a completed transaction remain in json form?
+            transaction = self.node.mempool[dict["id"]]
+            if transaction.completed:
                 transaction.sig_chain_to_json()
                 transaction_to_send = copy.deepcopy(transaction)
                 transactions.append(transaction_to_dict(transaction_to_send))
@@ -194,7 +193,7 @@ class MessageHandler:
 
     def request_block(self, current_height, enode):
         """ Send the last 5 blocks header hash """
-        #TODO: Alter this so that it just sends the last block?
+
 
         content = []
         # Sends the block header + height of the last 5 blocks before the specified height

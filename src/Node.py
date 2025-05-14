@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import sys
 import urllib.parse
 
 import nacl.signing
@@ -155,6 +156,7 @@ class Node:
                     transaction):  #Think the first one is a redundant check but whatevs
                 if self.id == transaction.destination:
                     transaction.completed = True
+                    print(f"size of transaction {sys.getsizeof(transaction)}, size of sig {sys.getsizeof(transaction.signature_chain[0])}")
                 #print(f"transaction {transaction}, self, {self.id} MEMPOOL SYNC")
                 self.add_to_mempool(transaction)
 
@@ -162,7 +164,7 @@ class Node:
         """This function is passed the full list of transactions that the requested neighbour has,
         it checks through its own transactions and finds the ones that the neighbours has, that it does it
         It then returns a list of transactions that it wishes the neighbour to send across"""
-        missing_transactions = []  #TODO: adjust logic so that it takes the completed transaction with the longest chain?
+        missing_transactions = []
         for dict in id_dict_list:
             if dict["id"] not in self.previous_transactions_id and dict["id"] not in self.mempool.keys():
                 missing_transactions.append(dict)
@@ -187,9 +189,11 @@ class Node:
         partial_chain = []
         for block_repr in chain_repr:
             block_vars = create_block_from_list(block_repr)
-            block = Block(*block_vars[:-1])
+            block = Block(*block_vars[:-2])
             block.signature = block_vars[-1]
+            block.byzantine = block_vars[-2]
             partial_chain.append(block)
+
 
         if not self.verify_chain(partial_chain):
             logger.warning("Received an invalid chain")

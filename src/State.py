@@ -34,7 +34,6 @@ class StateMixin:
         self.msg = tx
         self.block = block
 
-        #TODO: might have to comment out the balance stuff for now
 
         # Initialize funds of unused addresses
         #This function sets the value of the balance at 0 if not already initialised, returns value if key exists
@@ -46,7 +45,6 @@ class StateMixin:
             logger.info("Insufficient Balance")
             return
 
-        #TODO: funds arent transfered, just minused by the cost of the transaction, money given out later
 
         # Apply the transfer of funds
         self.balances[tx.sender] -= tx.value

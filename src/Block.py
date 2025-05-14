@@ -60,7 +60,6 @@ class Block:
         computes the hash of the block transactions
         :return: the hash of the transaction list
         """
-        #TODO: figure out why tf this function called so many times for seemingly no reason
         transaction_list = []
         for t in self.data:
             t.sig_chain_to_json()
