@@ -1,13 +1,11 @@
 import copy
+import logging
 import threading
 from random import randint
-from time import time, sleep
 
-from toychain.src.utils import constants
-from toychain.src.utils.helpers import gen_enode
 from toychain.src.Block import Block, State
+from toychain.src.utils.helpers import gen_enode
 
-import logging
 logger = logging.getLogger('poa')
 
 # Parameters for Proof-of-Authority
@@ -98,7 +96,7 @@ class ProofOfAuthority:
 
         return True
 
-class ProofOfAuth():
+class ProofOfAuth:
     """
     Generates a block every X seconds
     """

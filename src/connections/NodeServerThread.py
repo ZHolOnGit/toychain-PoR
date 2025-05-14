@@ -92,12 +92,12 @@ class NodeServerThread(threading.Thread):
             data = self.receive(sock)
         except:
             print("Error receiving data")
-
         try:
           answer = pickle.loads(data)
         except EOFError as e:
-          print(data)
+          print(data,"data from transcation")
           raise e
+
         self.message_handler.handle_answer(answer)
 
         sock.close()
@@ -127,5 +127,4 @@ class NodeServerThread(threading.Thread):
             print(f"Socket error occurred: {e}")
         finally:
             sock.settimeout(None)  # Reset the timeout to the default (blocking mode)
-       
         return b"".join(data)

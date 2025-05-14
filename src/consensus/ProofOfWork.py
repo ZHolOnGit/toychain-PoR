@@ -80,7 +80,7 @@ class ProofOfWork:
 
         return True
         
-class VirtualMining():
+class VirtualMining:
     """
     Thread class that generate blocks that answer to the consensus rules
     This block generation is done according to the proof of work

@@ -1,16 +1,24 @@
-import urllib.parse, hashlib, json
-
-from toychain.src.connections.NodeServerThread import NodeServerThread
-from toychain.src.connections.Pingers import ChainPinger, MemPoolPinger
-from toychain.src.utils.helpers import CustomTimer, create_block_from_list
-from toychain.src.Block import Block
-
+import hashlib
+import json
 import logging
+import sys
+import urllib.parse
+
+import nacl.signing
+
+from toychain.src.Block import Block
+from toychain.src.Transaction import validate_transaction
+from toychain.src.connections.NodeServerThread import NodeServerThread
+from toychain.src.connections.Pingers import ChainPinger, MemPoolPinger, VotePinger
+from toychain.src.utils.helpers import CustomTimer, create_block_from_list
+
 logger = logging.getLogger('w3')
+
 
 class Node:
     """
     Class representing a 'user' that has his id, his blockchain and his mem-pool
+    Represents one of the robots
     """
 
     def __init__(self, id, host, port, consensus):
@@ -19,8 +27,8 @@ class Node:
         self.mempool = {}
 
         # Transactions contained in the chain
-        self.my_transaction_nonce     = 0
-        self.my_transactions          = []
+        self.my_transaction_nonce = 0  #A counter of the number of transactions sent
+        self.my_transactions = []
         self.previous_transactions_id = set()
 
         self.host = host
@@ -40,8 +48,10 @@ class Node:
         # Sync Threads
         self.node_server_thread = NodeServerThread(self, host, port, id)
         self.message_handler = self.node_server_thread.message_handler
+
         self.mempool_sync_thread = MemPoolPinger(self)
         self.chain_sync_thread = ChainPinger(self)
+        self.vote_sync_thread = VotePinger(self)
 
         self.syncing = False
         self.mining = False
@@ -49,18 +59,21 @@ class Node:
 
         # For visualization only
         self.produced_block = ""
-    
+
+        #For signature chain
+        self.private_key, self.public_key = self.gen_keys()
 
     @property
     def sc(self):
         return self.get_block('latest').state
-    
+
     def step(self):
         """
         Executes a time step for this node
         """
         self.custom_timer.step()
         self.mempool_sync_thread.step()
+        self.vote_sync_thread.step()
         self.chain_sync_thread.step()
         self.mining_thread.step()
 
@@ -68,7 +81,7 @@ class Node:
         # all_tx_ids = set([tx.id for tx in self.get_all_transactions()])
         # if all_tx_ids != self.previous_transactions_id:
         #     print("Some problem with previous transactions set")
-    
+
     def start(self):
         self.start_mining()
         self.start_tcp()
@@ -95,7 +108,7 @@ class Node:
         """
         self.syncing = True
         self.node_server_thread.start()
-        self.chain_sync_thread.start()
+        # self.chain_sync_thread.start()
         self.mempool_sync_thread.start()
 
     def stop_tcp(self):
@@ -106,6 +119,7 @@ class Node:
         self.node_server_thread.stop()
         self.chain_sync_thread.stop()
         self.mempool_sync_thread.stop()
+        self.vote_sync_thread.stop()
         self.syncing = False
 
     def destroy_node(self):
@@ -138,12 +152,32 @@ class Node:
         Synchronises the mempool with a list of transaction objects
         """
         for transaction in transactions:
-            if transaction.id not in self.previous_transactions_id:
+            if transaction.id not in self.previous_transactions_id and validate_transaction(
+                    transaction):  #Think the first one is a redundant check but whatevs
+                if self.id == transaction.destination:
+                    transaction.completed = True
+                    print(f"size of transaction {sys.getsizeof(transaction)}, size of sig {sys.getsizeof(transaction.signature_chain[0])}")
+                #print(f"transaction {transaction}, self, {self.id} MEMPOOL SYNC")
                 self.add_to_mempool(transaction)
+
+    def find_missing_transactions(self, id_dict_list):
+        """This function is passed the full list of transactions that the requested neighbour has,
+        it checks through its own transactions and finds the ones that the neighbours has, that it does it
+        It then returns a list of transactions that it wishes the neighbour to send across"""
+        missing_transactions = []
+        for dict in id_dict_list:
+            if dict["id"] not in self.previous_transactions_id and dict["id"] not in self.mempool.keys():
+                missing_transactions.append(dict)
+            else:
+                if dict["completed"] and dict["id"] in self.mempool.keys() and self.mempool[
+                    dict["id"]].completed == False:
+                    missing_transactions.append(dict)
+        return missing_transactions
 
     def sync_chain(self, chain_repr, height):
         """
         Append a partial chain to the blockchain
+        In theroy, using PoR this partial chain will only ever have one item in it
 
         Args:
             chain_repr(list[str]): list of block representation from a partial chain received
@@ -155,15 +189,13 @@ class Node:
         partial_chain = []
         for block_repr in chain_repr:
             block_vars = create_block_from_list(block_repr)
-            partial_chain.append(Block(*block_vars))
+            block = Block(*block_vars[:-2])
+            block.signature = block_vars[-1]
+            block.byzantine = block_vars[-2]
+            partial_chain.append(block)
 
-        # Validate the partial chain
-        if partial_chain[-1].total_difficulty < self.get_block('last').total_difficulty:
-            logger.warning("Received a lower difficulty chain")
-            print("Received a lower difficulty chain")
-            return
 
-        elif not self.verify_chain(partial_chain):
+        if not self.verify_chain(partial_chain):
             logger.warning("Received an invalid chain")
             print("Received an invalid chain")
             return
@@ -175,12 +207,11 @@ class Node:
 
         # Insert the partial chain
         else:
-
             for block in partial_chain:
                 block.reception = self.custom_timer.time()
 
             # Retrieve transactions on discarded blocks
-            for block in self.chain[height+1:]:
+            for block in self.chain[height + 1:]:
                 for transaction in block.data:
                     self.add_to_mempool(transaction)
                     self.previous_transactions_id.remove(transaction.id)
@@ -191,25 +222,25 @@ class Node:
                     self.mempool.pop(transaction.id, None)
                     self.previous_transactions_id.add(transaction.id)
 
-            del self.chain[height+1:]
+            del self.chain[height + 1:]
             self.chain.extend(partial_chain)
-            logger.info(f"Node {self.id} has updated its chain, total difficulty : {self.get_block('last').total_difficulty}, n = {partial_chain[-1].state.state_variables.get('n')}")
+
+            print(f"Node {self.id} has updated its chain, n = {partial_chain[-1].state.state_variables.get('n')}")
             for block in self.chain[-5:]:
                 logger.info(f"{block.__repr__()}   ##{len(block.data)}##  {block.state.state_variables}")
-
-
 
     def add_peer(self, enode):
         # if len(self.peers) > 5:
         #     print('max peers reached')
         #     return False
-        
+
         if enode in self.peers:
             return False
 
         logger.debug(f"Node {self.id} adding peer at {enode}")
         parsed_enode = urllib.parse.urlparse(enode)
-        node_info = {"id": parsed_enode.username, "host": parsed_enode.hostname, "port": parsed_enode.port, "enode": enode}
+        node_info = {"id": parsed_enode.username, "host": parsed_enode.hostname, "port": parsed_enode.port,
+                     "enode": enode}
         self.peers[enode] = node_info
         return True
 
@@ -222,8 +253,9 @@ class Node:
         return info
 
     def verify_chain(self, chain):
-        return self.consensus.verify_chain(chain, self.get_block('last').state)
+        return self.consensus.verify_chain(chain, self.mining_thread.winning_signatures)
 
+    #Turns out sending the transaction just adds it to the mempool, awaiting sync
     def send_transaction(self, transaction):
         logger.info(f"Sending transaction {transaction}")
         self.my_transactions.append(transaction)
@@ -278,23 +310,23 @@ class Node:
         return int(self.chain[-1].total_difficulty)
 
     def get_sync_info(self):
-        return (self.get_block('last').get_header_hash(), self.get_block('last').total_difficulty)
-    
+        return self.get_block('last').get_header_hash(), len(self.chain)
+
     def get_produced_block(self):
         t = self.produced_block
         self.produced_block = ""
         return t
 
-    def mempool_hash(self, astype = None, digest_size = 1):
+    def mempool_hash(self, astype=None, digest_size=1):
         # Step 1: Convert each transaction to a serialized JSON string
         serialized_mempool = [json.dumps(txn, sort_keys=True) for txn in self.mempool]
-        
+
         # Step 2: Sort the serialized transactions to ensure order doesn't matter
         serialized_mempool.sort()
-        
+
         # Step 3: Concatenate the sorted serialized transactions
         combined = ''.join(serialized_mempool)
-        
+
         # Step 4: Hash the combined string using SHA-256
         blake2s_hash = hashlib.blake2s(combined.encode(), digest_size=digest_size)
         if astype == 'string' or astype == 'str' or astype == str:
@@ -303,7 +335,7 @@ class Node:
             return int.from_bytes(blake2s_hash.digest(), 'big')
         return blake2s_hash
 
-    def last_hash(self, astype = None, digest_size = 1):
+    def last_hash(self, astype=None, digest_size=1):
         # Step 1: Hash the last block hash string using SHA-256
         blake2s_hash = hashlib.blake2s(self.chain[-1].hash.encode(), digest_size=digest_size)
         if astype == 'string' or astype == 'str' or astype == str:
@@ -312,19 +344,35 @@ class Node:
             return int.from_bytes(blake2s_hash.digest(), 'big')
         return blake2s_hash
 
-    @property  
+    @property
     def key(self):
         return self.id
-    
+
     # @property  
     # def previous_transactions_id(self):
     #     return set([])
 
-    @property  
+    @property
     def current_height(self):
         return len(self.chain)
 
-    def gen_enode(self, id, host = '127.0.0.1', port = 0):
+    def gen_enode(self, id, host='127.0.0.1', port=0):
         if port == 0:
             port = 1233 + int(id)
         return f"enode://{id}@{host}:{port}"
+
+    def gen_keys(self):
+
+        private_key = nacl.signing.SigningKey.generate()
+        public_key = private_key.verify_key
+        #Cryptography version, fuck encoding type
+        # private_key = Ed25519PrivateKey.generate()
+        # public_key = private_key.public_key()
+
+        return private_key, public_key
+
+    def add_block(self, block):
+        self.chain.append(block)
+        if block.state.consensus_reached:
+            print(
+                f"FREQUENCY CONSENSUS RECHED estimate: {block.state.frequency_estimate} at time {self.custom_timer.time()}")

@@ -1,8 +1,13 @@
-from toychain.src.utils import constants
-from toychain.src.utils.constants import MEMPOOL_SYNC_TAG, CHAIN_SYNC_TAG, BLOCK_REQUEST_TAG, DEBUG
-from toychain.src.utils.helpers import dict_to_transaction, transaction_to_dict, block_to_list
-
+import copy
 import logging
+import urllib.parse
+
+
+from toychain.src.utils.constants import MEMPOOL_SYNC_TAG, CHAIN_SYNC_TAG, BLOCK_REQUEST_TAG, MISSING_MEMPOOL_TAG, \
+    GET_VOTE_TAG
+from toychain.src.utils.helpers import transaction_to_dict, block_to_list, \
+    transaction_to_id, vote_to_dict, dict_to_transaction
+
 logger = logging.getLogger('w3')
 
 class MessageHandler:
@@ -13,17 +18,21 @@ class MessageHandler:
         self.node = node_server.node
         self.enode = self.node.enode
 
-        # Message type to handler  mappings 
+        # Message type to handler  mappings
         self.requests_handler_mapping = {
             MEMPOOL_SYNC_TAG: self.handle_request_mempool,
             CHAIN_SYNC_TAG: self.handle_request_sync,
             BLOCK_REQUEST_TAG: self.handle_request_block,
+            MISSING_MEMPOOL_TAG: self.handle_request_missing_mempool, #Missing mempool is the one that actually sends the missing transactions
+            GET_VOTE_TAG: self.handle_vote_request
             }
 
-        self.answers_handler_mapping = { 
-            CHAIN_SYNC_TAG: self.handle_answer_sync,
+        self.answers_handler_mapping = {
             MEMPOOL_SYNC_TAG: self.handle_answer_mempool,
+            CHAIN_SYNC_TAG: self.handle_answer_sync,
             BLOCK_REQUEST_TAG: self.handle_answer_block,
+            MISSING_MEMPOOL_TAG: self.handle_answer_missing,
+            GET_VOTE_TAG: self.handle_vote_answer
             }
 
     def handle_request(self, msg):
@@ -69,19 +78,23 @@ class MessageHandler:
         return True
 
     ################# REQUEST HANDLERS ########################
-    def handle_request_sync(self, msg):
-        """ Returns the latest hash and difficulty """
-        return (self.node.get_block('last').get_header_hash(), self.node.get_block('last').total_difficulty)
+
 
     def handle_request_mempool(self, msg):
-        """ Returns the current mempool as a list """
-        return [transaction_to_dict(t) for t in self.node.mempool.values()]
+        """ Returns the current mempool as a list of ids """
+        return [transaction_to_id(t) for t in self.node.mempool.values()]
+
+    def handle_request_sync(self, msg):
+        """ Returns the latest hash and difficulty """
+        return self.node.get_block('last').get_header_hash(), len(self.node.chain)
 
     def handle_request_block(self, msg):
-        """ Checks if one of the indicated blocks is in its chain """
-           
+        """ Checks if one of the indicated blocks is in its chain
+            Once a common block is found """
+        #Might have to alter this one, but don't really see the harm in keeping the partial chain stuff
+        #Assuming that there are no forks in the chain,
+        #print(f"Block sync request data {msg['data']}, id that crashes {self.node.id}, id sender {msg['sender']}")
         for header_hash, height in msg["data"]:
-
             potential_common_block = self.node.get_block(height)
             if potential_common_block is None:
                 return None, None
@@ -96,47 +109,94 @@ class MessageHandler:
                 return height, partial_chain
         return height, None
 
+    def handle_request_missing_mempool(self, msg):
+        """This function gets all the transactions that are requested by id, signs them, then sends them to the
+        requester """
+        transactions = []
+        for dict in msg["data"]:
+            transaction = self.node.mempool[dict["id"]]
+            if transaction.completed:
+                transaction.sig_chain_to_json()
+                transaction_to_send = copy.deepcopy(transaction)
+                transactions.append(transaction_to_dict(transaction_to_send))
+                transaction.json_to_sig_chain()
+            else:
+                #his is a bit of a mess and hopefully not too inefficient, but needs to be json to copy and send but needs
+                #to have the actual signature stuff to sign
+                transaction.sig_chain_to_json()
+                transaction_to_send = copy.deepcopy(transaction)
+                transaction_to_send.json_to_sig_chain()
+                #self.node.get_block('last') - for getting the last block in the chain
+                transaction_to_send.add_signature(self.node.private_key,self.node.public_key, self.node.id, urllib.parse.urlparse((msg["sender"])).username)
+                #print(f"transaction {transaction_to_send} self {self.node.id}, transaction Nonce ,{self.node.my_transaction_nonce}, sending to {msg['sender']}, ")
+                transaction_to_send.sig_chain_to_json()
+                transactions.append(transaction_to_dict(transaction_to_send))
+                transaction.json_to_sig_chain()
+
+
+        #print(f"{len(transactions)} missing transactions sent")
+        return transactions
+
+
+    def handle_vote_request(self,msg):
+        #print(f"get Vote id: {self.node.id} candidate: {self.node.mining_thread.candidate_state}")
+        return vote_to_dict(self.node.id, self.node.mining_thread.candidate_state, self.node.mining_thread.sig_chain_cache[1])
+
+
     ################# ANSWER HANDLERS  ########################
+
+    def handle_answer_mempool(self, msg):
+       """This function takes the list of transactions given, finds the ones that it does not already have,
+       and returns the id of these transactions back to the requester node"""
+       missing_transactions = self.node.find_missing_transactions(msg["data"])
+
+       if len(missing_transactions) > 0:
+           self.request_transactions(missing_transactions, msg["sender"])
+
+        # transaction_list = [dict_to_transaction(d) for d in msg["data"]]
+        # self.node.sync_mempool(transaction_list)
+
+    def request_transactions(self,missing_transactions, enode):
+        """This function constructs, then sends the request containing the ids of the transactions that are
+        missing from this node and need to be signed and sent from the sender"""
+        request = self.construct_message(missing_transactions, MISSING_MEMPOOL_TAG,enode)
+        self.node_server.send_request(enode,request)
 
     def handle_answer_sync(self, msg):
 
-        peer_hash, peer_difficulty   = msg["data"]
-        local_hash, local_difficulty = self.node.get_sync_info()
+        peer_hash, peer_height   = msg["data"]
+        local_hash, local_height = self.node.get_sync_info()
+
+        #print(f"ID {self.node.id}, sender: {msg['sender']}, Answer sync LH:{local_height}, PH: {peer_height}, LHash: {local_hash}, PHash: {peer_hash}")
 
         # Case 1: My chain is already synchronized with the peer
         if local_hash == peer_hash:
             return
-
-        # Case 2: My chain is longer or has equal difficulty
-        elif local_difficulty >= peer_difficulty:
+        #My chain is longer or equal length - equal len kinda checked above
+        elif local_height >= peer_height:
             return
-
         # Case 3: Peer has longer chain
         else:
             self.request_block(self.node.current_height, msg["sender"])
 
-    def handle_answer_mempool(self, msg):
-        
-        self.node.sync_mempool([dict_to_transaction(d) for d in msg["data"]])
 
     def handle_answer_block(self, msg):
-
         height, partial_chain = msg["data"]
-
         if height is None:
             return
 
         if partial_chain is None:
             self.request_block(height, msg["sender"])
-            
+
         elif len(partial_chain) > 0:
             self.node.sync_chain(partial_chain, height)
 
     def request_block(self, current_height, enode):
         """ Send the last 5 blocks header hash """
-    
+
+
         content = []
-        # Sends the block header + height of the last 5 blocks before the precised height
+        # Sends the block header + height of the last 5 blocks before the specified height
         for block in reversed(self.node.chain[max(0, current_height - 5):current_height]):
             content.append((block.get_header_hash(), block.height))
 
@@ -144,6 +204,16 @@ class MessageHandler:
         self.node_server.send_request(enode, request)
 
 
+    def handle_answer_missing(self,msg):
+        """This function receives the requested transactions and adds them to the current mempool"""
+        transaction_list = [dict_to_transaction(d) for d in msg["data"]]
+        for transaction in transaction_list:
+            transaction.json_to_sig_chain()
+        self.node.sync_mempool(transaction_list)
+
+    def handle_vote_answer(self,msg):
+        """This function adds the vote received to the current collection of votes"""
+        self.node.mining_thread.add_vote(msg["data"])
 
 
 

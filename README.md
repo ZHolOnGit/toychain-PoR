@@ -36,6 +36,11 @@ The consensus options are contained in their own file
 
 ``ProofOfAuth.trust``: Determines if the state should be checked or not when verifying a chain 
 
+##### Proof of Relay
+``BLOCK_PERIOD``: The time it takes for each phase of the algorithm. stored in utls.constants
+
+``max_recent_leaders``: the max number of recent leaders that are conisidered when applying penalties to signature comparison
+
 The __genesis block__ is organised this way:
 
 - miner_id contains the authorised signers list
@@ -50,6 +55,9 @@ The __genesis block__ is organised this way:
 All the other options are contained in the ``constants.py`` file.
 
 ``MEMPOOL_SYNC_INTERVAL``: Time interval between two synchronisation process in the ``MempoolPinger``
+
+``VOTE_SYNC_INTERVAL``: Time interval between two synchronisation process in the ``VotePinger``, only relevant for PoR
+
 
 ``CHAIN_SYNC_INTERVAL``: Time interval between two synchronisation process in the ``ChainPinger``
 
